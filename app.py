@@ -46,8 +46,8 @@ IMAGEN_MENU = "logo.jpg"  # Cambia aquí la imagen inicial si quieres probar otr
 MEDIA_IDS = {}  # cache en memoria de IDs de imágenes subidas a Meta
 
 ADMIN_NUMBERS = {
-    "525611511944",  # Número personal autorizado para la futura versión admin
-}
+    n.strip() for n in os.environ.get("ADMIN_NUMBERS", "").split(",") if n.strip()
+}  # Números autorizados para la futura versión admin, solo por variable de entorno (nunca en el código público).
 
 # Horario DEMO transcrito de la imagen compartida.
 # Como el gimnasio indica que los horarios pueden cambiar, el bot debe
