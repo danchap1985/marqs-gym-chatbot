@@ -1107,6 +1107,30 @@ def send_whatsapp_message(to, message):
 def home():
     return "Bot de WhatsApp de MARQ'S GYM & SPORTS funcionando."
 
+@app.route("/privacy")
+def privacy():
+    return """<html><head><meta charset="utf-8"><title>Política de Privacidad - MARQ'S GYM & SPORTS</title></head><body style="font-family:sans-serif;max-width:800px;margin:40px auto;padding:0 20px;line-height:1.6">
+<h1>Política de Privacidad - MARQ'S GYM &amp; SPORTS</h1>
+<p><strong>Última actualización:</strong> 14 de noviembre de 2026</p>
+<p>MARQ'S GYM &amp; SPORTS, ubicado en C. Tierra Colorada 29, Tierra Nueva, Azcapotzalco, 02130, Ciudad de México, CDMX, opera un chatbot de WhatsApp para atender consultas sobre horarios, actividades, precios, promociones y ubicación del gimnasio.</p>
+<h2>Datos que recopilamos</h2>
+<p>Cuando usted escribe al chatbot por WhatsApp, recibimos su número de teléfono y los mensajes que envía, a través de la API de WhatsApp de Meta. No solicitamos contraseñas, datos bancarios ni información sensible.</p>
+<h2>Uso de los datos</h2>
+<p>Usamos su número y sus mensajes únicamente para responder a sus consultas, mostrarle horarios, precios y promociones, y atenderle en recepción. No vendemos ni compartimos sus datos con terceros, salvo con Meta / WhatsApp, que procesa los mensajes como proveedor del servicio de mensajería.</p>
+<h2>Conservación y derechos</h2>
+<p>Los mensajes se conservan solo el tiempo necesario para atender su consulta. Usted puede pedir que dejemos de escribirle escribiendo "baja" o contactando a recepción del gimnasio, y puede solicitar la eliminación de su conversación.</p>
+<h2>Contacto</h2>
+<p>Para cualquier duda sobre esta política, acuda a recepción de MARQ'S GYM &amp; SPORTS, C. Tierra Colorada 29, Tierra Nueva, Azcapotzalco, 02130, Ciudad de México, CDMX, o escriba por WhatsApp al +52 56 4869 1745.</p>
+</body></html>"""
+
+@app.route("/terms")
+def terms():
+    return """<html><head><meta charset="utf-8"><title>Condiciones del Servicio - MARQ'S GYM & SPORTS</title></head><body style="font-family:sans-serif;max-width:800px;margin:40px auto;padding:0 20px;line-height:1.6">
+<h1>Condiciones del Servicio - MARQ'S GYM &amp; SPORTS</h1>
+<p>El chatbot de WhatsApp de MARQ'S GYM &amp; SPORTS ofrece información de referencia sobre horarios, actividades, precios y promociones. Los horarios y precios pueden cambiar; confirme vigencia y requisitos en recepción del gimnasio, en C. Tierra Colorada 29, Tierra Nueva, Azcapotzalco, 02130, Ciudad de México, CDMX.</p>
+<p>El servicio se presta tal cual, sin garantía de disponibilidad continua. Para dudas, escriba al +52 56 4869 1745.</p>
+</body></html>"""
+
 if __name__ == "__main__":
     log_evento("BOT INICIADO", f"{GYM_NAME} V9 ACTIVIDADES | puerto 5000")
     if not TOKEN:
