@@ -119,6 +119,31 @@ def normalizar_texto(texto):
 ESTADOS_CONVERSACION = {}
 ACTIVIDAD_SELECCIONADA = {}  # actividad elegida por cada usuario durante la demo
 
+# Deduplicación por ID de mensaje de WhatsApp (wamid): Meta a veces reenvía
+# el mismo mensaje y sin esto el bot lo contesta otra vez como si fuera nuevo
+# (eso explica los "hola" repetidos del 2026-11-15). Solo vive en memoria:
+# se reinicia si el servicio se detiene o se duerme (Render Free), así que un
+# reenvío después de un reinicio podría contestarse una vez más. Se guardan
+# como máximo los últimos 500 IDs.
+from collections import deque as _deque
+
+_MENSAJES_PROCESADOS = set()
+_MENSAJES_ORDEN = _deque()
+
+
+def _mensaje_ya_procesado(mensaje_id):
+    """True si este wamid ya se contestó; si es nuevo, lo registra y da False.
+    Los mensajes sin ID no se deduplican (compatibilidad con pruebas viejas)."""
+    if not mensaje_id:
+        return False
+    if mensaje_id in _MENSAJES_PROCESADOS:
+        return True
+    _MENSAJES_PROCESADOS.add(mensaje_id)
+    _MENSAJES_ORDEN.append(mensaje_id)
+    while len(_MENSAJES_PROCESADOS) > 500:
+        _MENSAJES_PROCESADOS.discard(_MENSAJES_ORDEN.popleft())
+    return False
+
 
 def menu_principal():
     return (
@@ -321,8 +346,13 @@ def responder(mensaje, remitente=""):
     texto = normalizar_texto(mensaje)
     estado = ESTADOS_CONVERSACION.get(remitente, "inicio")
 
-    # Menú de promociones: envía imágenes adjuntas al proyecto.
-    if texto in {"3", "promociones", "ver promociones", "promo", "promos", "ofertas"} and estado in {"inicio", "menu", "seguimiento", "promociones"}:
+    # Menú de promociones: las palabras van a promos en cualquier estado,
+    # pero el número 3 solo es "promociones" en el menú principal (inicio/menu).
+    # En seguimiento, 3 = precios; en promociones, 3 = ver la 3a promo.
+    if texto in {"promociones", "ver promociones", "promo", "promos", "ofertas"} and estado in {"inicio", "menu", "seguimiento", "promociones"}:
+        ESTADOS_CONVERSACION[remitente] = "promociones"
+        return respuesta_promociones()
+    if texto == "3" and estado in {"inicio", "menu"}:
         ESTADOS_CONVERSACION[remitente] = "promociones"
         return respuesta_promociones()
 
@@ -342,25 +372,30 @@ def responder(mensaje, remitente=""):
         ESTADOS_CONVERSACION[remitente] = "menu"
         return menu_principal()
 
-    if texto in {"5", "volver", "menu principal", "regresar"}:
+    if texto in {"volver", "menu principal", "regresar"}:
         ESTADOS_CONVERSACION[remitente] = "menu"
         return menu_principal()
 
     # Las opciones numéricas dependen del menú que el cliente está viendo.
-    if estado == "menu" and texto in {"2", "4", "5"}:
+    # En frío ("inicio") valen las del menú principal: 2 precios, 4 ubicación,
+    # 5 ayúdame a elegir. El 5 en seguimiento vuelve al menú principal.
+    if estado in {"menu", "inicio"} and texto in {"2", "4", "5"}:
         if texto == "2":
             texto = "precios"
         elif texto == "4":
             texto = "ubicacion"
         elif texto == "5":
             texto = "ayudame a elegir"
-    elif estado == "seguimiento" and texto in {"2", "3", "4"}:
+    elif estado == "seguimiento" and texto in {"2", "3", "4", "5"}:
         if texto == "2":
             texto = "preguntar por una actividad"
         elif texto == "3":
             texto = "precios"
         elif texto == "4":
             texto = "ubicacion"
+        elif texto == "5":
+            ESTADOS_CONVERSACION[remitente] = "menu"
+            return menu_principal()
 
     # Opciones numéricas: se interpretan según el contexto y también desde el menú.
     if texto == "1" and estado in {"inicio", "menu", "seguimiento", "esperando_dia"}:
@@ -628,7 +663,7 @@ def verify_webhook():
     mode = request.args.get("hub.mode")
     token = request.args.get("hub.verify_token")
     challenge = request.args.get("hub.challenge")
-    if mode == "subscribe" and token == VERIFY_TOKEN:
+    if mode == "subscribe" and token == VERIFY_TOKEN and challenge:
         log_evento("WEBHOOK VERIFICADO", "Meta completó la verificación")
         return challenge, 200
     return "Forbidden", 403
@@ -654,6 +689,10 @@ def receive_message():
                 for message in value.get("messages", []):
                     sender = message.get("from", "")
                     tipo_mensaje = message.get("type", "desconocido")
+                    mensaje_id = message.get("id", "")
+                    if _mensaje_ya_procesado(mensaje_id):
+                        log_evento("MENSAJE DUPLICADO IGNORADO", f"de={sender} | id={mensaje_id}")
+                        continue
                     seleccion_id = ""
                     if tipo_mensaje == "interactive":
                         interactive = message.get("interactive", {})
@@ -712,7 +751,7 @@ def receive_message():
                         continue
 
                     texto_norm = normalizar_texto(incoming_text)
-                    log_evento("MENSAJE RECIBIDO", f"de={sender} | texto={incoming_text!r} | id={seleccion_id or '-'}")
+                    log_evento("MENSAJE RECIBIDO", f"de={sender} | texto={incoming_text!r} | id={mensaje_id or '-'}")
 
                     # Saludo o regreso al menú principal: imagen configurable + lista principal.
                     if texto_norm in {"hola", "holi", "buenas", "buenos dias", "buenas tardes", "buenas noches", "menu", "inicio", "ayuda", "opciones", "0", "menu principal"}:
@@ -909,7 +948,12 @@ def receive_message():
                         ], "Continuar")
                         continue
 
-                    if seleccion_id == "menu_promos" or (texto_norm in {"3", "promociones", "ver promociones", "promo", "promos", "ofertas"} and ESTADOS_CONVERSACION.get(sender) in {"inicio", "menu", "seguimiento", "promociones"}):
+                    # El "3" escrito solo abre promos desde el menú principal
+                    # (inicio/menu); en seguimiento 3 = precios y en promociones
+                    # 3 = ver la 3a promo. Las palabras sí abren promos siempre.
+                    _promo_por_numero = texto_norm == "3" and ESTADOS_CONVERSACION.get(sender) in {"inicio", "menu"}
+                    _promo_por_palabra = texto_norm in {"promociones", "ver promociones", "promo", "promos", "ofertas"} and ESTADOS_CONVERSACION.get(sender) in {"inicio", "menu", "seguimiento", "promociones"}
+                    if seleccion_id == "menu_promos" or _promo_por_numero or _promo_por_palabra:
                         ESTADOS_CONVERSACION[sender] = "promociones"
                         send_whatsapp_message(sender, "🎉 *Promociones de MARQ'S GYM & SPORTS*\nTe enviaré la imagen de la promoción que elijas. Confirma vigencia y requisitos en recepción.")
                         enviar_lista(sender, "Selecciona la promoción que quieres ver.", "Ver opciones", [
