@@ -35,6 +35,12 @@ GYM_ADDRESS = (
     "C. Tierra Colorada 29, Tierra Nueva, Azcapotzalco, "
     "02130, Ciudad de México, CDMX"
 )
+# Coordenadas del gym (verificadas por geocodificación de la dirección):
+# 19.5002, -99.20119. WhatsApp no permite poner una imagen/logo en el pin
+# de ubicación: el pin es el estándar de mapas, con nombre y dirección.
+GYM_LATITUDE = 19.5002
+GYM_LONGITUDE = -99.20119
+GYM_MAPS_URL = "https://www.google.com/maps/search/?api=1&query=19.5002,-99.20119"
 
 # Este número queda editable para la futura administración por WhatsApp.
 # Se guarda sin + ni espacios. Para agregar/cambiarlo, edita esta lista.
@@ -438,11 +444,9 @@ def responder(mensaje, remitente=""):
         phrase in texto for phrase in ("direccion del gimnasio", "ubicacion del gimnasio", "como llego al gimnasio", "donde esta el gimnasio", "donde queda el gym", "comparteme la ubicacion")
     ):
         ESTADOS_CONVERSACION[remitente] = "seguimiento"
-        return (
-            f"📍 *{GYM_NAME}*\n{GYM_ADDRESS}\n\n"
-            "Puedes buscar la dirección en Google Maps copiándola tal como aparece arriba.\n\n"
-            + menu_seguimiento()
-        )
+        # Centinela: receive_message() lo convierte en pin de ubicación
+        # nativo de WhatsApp (enviar_ubicacion) + lista de seguimiento.
+        return "UBICACION_PIN"
 
     if texto in {"3", "mensualidad", "mensualidades", "pagos", "4", "precio", "precios", "tarifas", "costos", "inscripcion", "inscripciones"} or any(
         phrase in texto for phrase in ("cuanto cuesta", "cuanto cobran", "precio de la mensualidad", "costo de inscripcion", "formas de pago", "como me inscribo", "quiero inscribirme", "cuanto es la mensualidad", "cuanto cuesta entrenar")
@@ -620,6 +624,42 @@ def enviar_lista(to, texto, boton, filas, titulo_seccion="Opciones"):
         return False
     except requests.RequestException as exc:
         log_evento("ERROR CONEXION LISTA", str(exc))
+        return False
+
+
+def enviar_ubicacion(to):
+    """Envía el pin de ubicación del gym (mapa nativo de WhatsApp).
+
+    Al tocarlo, el usuario ve el mapa y puede pedir la ruta para llegar.
+    WhatsApp no permite personalizar el pin con una imagen o logo: el pin
+    es el estándar, con el nombre y la dirección del gym.
+    """
+    if not TOKEN:
+        log_evento("ERROR DE CONFIGURACION", "falta WHATSAPP_TOKEN")
+        return False
+    url = f"https://graph.facebook.com/v23.0/{PHONE_NUMBER_ID}/messages"
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": normalizar_numero(to),
+        "type": "location",
+        "location": {
+            "latitude": GYM_LATITUDE,
+            "longitude": GYM_LONGITUDE,
+            "name": GYM_NAME,
+            "address": GYM_ADDRESS,
+        },
+    }
+    try:
+        resp = requests.post(url, headers={"Authorization": f"Bearer {TOKEN}",
+            "Content-Type": "application/json"}, json=payload, timeout=20)
+        if resp.status_code == 200:
+            log_evento("UBICACION ENVIADA", f"para={normalizar_numero(to)}")
+            return True
+        log_evento("ERROR META UBICACION", f"HTTP {resp.status_code} | {resp.text[:600]}")
+        return False
+    except requests.RequestException as exc:
+        log_evento("ERROR CONEXION UBICACION", str(exc))
         return False
 
 
@@ -990,7 +1030,8 @@ def receive_message():
 
                     if seleccion_id == "menu_ubicacion" or seleccion_id == "info_ubicacion":
                         ESTADOS_CONVERSACION[sender] = "seguimiento"
-                        send_whatsapp_message(sender, f"📍 *{GYM_NAME}*\n{GYM_ADDRESS}\n\nPuedes copiar la dirección y buscarla en Google Maps.")
+                        if not enviar_ubicacion(sender):
+                            send_whatsapp_message(sender, f"📍 *{GYM_NAME}*\n{GYM_ADDRESS}\n\nÁbrelo en Google Maps: {GYM_MAPS_URL}")
                         enviar_lista_seguimiento(sender)
                         continue
 
@@ -1075,6 +1116,14 @@ def receive_message():
                             ("promo_todas", "Ver todas"),
                             ("promo_volver", "Menú principal")
                         ], "Promociones")
+                        continue
+
+                    # Ubicación por texto ("ubicacion", "4" en frío/seguimiento,
+                    # "donde queda", etc.): pin nativo + lista de seguimiento.
+                    if reply_text == "UBICACION_PIN":
+                        if not enviar_ubicacion(sender):
+                            send_whatsapp_message(sender, f"📍 *{GYM_NAME}*\n{GYM_ADDRESS}\n\nÁbrelo en Google Maps: {GYM_MAPS_URL}")
+                        enviar_lista_seguimiento(sender)
                         continue
 
                     # Convertir prompts de texto numerados a listas interactivas.
