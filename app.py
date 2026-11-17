@@ -41,6 +41,9 @@ GYM_ADDRESS = (
 GYM_LATITUDE = 19.5002
 GYM_LONGITUDE = -99.20119
 GYM_MAPS_URL = "https://www.google.com/maps/search/?api=1&query=19.5002,-99.20119"
+# Redes sociales del gym (links que el usuario puede tocar en WhatsApp).
+GYM_INSTAGRAM = "https://www.instagram.com/marqsgymsports/"
+GYM_FACEBOOK = "https://www.facebook.com/marqsgymsports"
 
 # Este número queda editable para la futura administración por WhatsApp.
 # Se guarda sin + ni espacios. Para agregar/cambiarlo, edita esta lista.
@@ -440,6 +443,17 @@ def responder(mensaje, remitente=""):
         ESTADOS_CONVERSACION[remitente] = "seguimiento"
         return respuesta_busqueda_clases(texto, day)
 
+    if texto in {"redes", "redes sociales", "instagram", "facebook", "siguenos", "síguenos", "sigueme", "sígueme"} or any(
+        phrase in texto for phrase in ("redes sociales", "tu instagram", "tu facebook", "donde los sigo")
+    ):
+        ESTADOS_CONVERSACION[remitente] = "seguimiento"
+        return (
+            f"💚 ¡Síguenos en nuestras redes! 📲\n\n"
+            f"Instagram: {GYM_INSTAGRAM}\n"
+            f"Facebook: {GYM_FACEBOOK}\n\n"
+            + menu_seguimiento()
+        )
+
     if texto in {"2", "direccion", "ubicacion", "mapa", "como llego", "donde estan", "donde queda", "donde se ubican"} or any(
         phrase in texto for phrase in ("direccion del gimnasio", "ubicacion del gimnasio", "como llego al gimnasio", "donde esta el gimnasio", "donde queda el gym", "comparteme la ubicacion")
     ):
@@ -681,6 +695,7 @@ def enviar_menu_info(to):
         ("info_precios", "Precios e inscripción"),
         ("info_ubicacion", "Ubicación"),
         ("info_elegir", "Elegir una clase"),
+        ("info_redes", "Redes sociales"),
         ("volver_menu", "Menú principal"),
     ])
 
@@ -692,6 +707,7 @@ def enviar_lista_seguimiento(to):
         ("follow_actividad", "Preguntar por actividad"),
         ("follow_precios", "Precios e inscripción"),
         ("follow_ubicacion", "Ubicación"),
+        ("follow_redes", "Redes sociales"),
         ("volver_menu", "Menú principal"),
     ], "Más opciones")
 
@@ -1032,6 +1048,12 @@ def receive_message():
                         ESTADOS_CONVERSACION[sender] = "seguimiento"
                         if not enviar_ubicacion(sender):
                             send_whatsapp_message(sender, f"📍 *{GYM_NAME}*\n{GYM_ADDRESS}\n\nÁbrelo en Google Maps: {GYM_MAPS_URL}")
+                        enviar_lista_seguimiento(sender)
+                        continue
+
+                    if seleccion_id in {"info_redes", "follow_redes"}:
+                        ESTADOS_CONVERSACION[sender] = "seguimiento"
+                        send_whatsapp_message(sender, f"💚 ¡Síguenos en nuestras redes! 📲\n\nInstagram: {GYM_INSTAGRAM}\nFacebook: {GYM_FACEBOOK}")
                         enviar_lista_seguimiento(sender)
                         continue
 
