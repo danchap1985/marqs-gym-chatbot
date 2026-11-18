@@ -1310,6 +1310,100 @@ def send_whatsapp_message(to, message):
 def home():
     return "Bot de WhatsApp de MARQ'S GYM & SPORTS funcionando."
 
+
+# Panel del gym (/panel): quién escribe al bot y qué pregunta.
+# Lo ve el dueño del gym (y cada cliente que compre un bot, con su propia
+# clave) desde el teléfono, sin instalar nada. La clave va en la variable
+# de entorno PANEL_PASSWORD (secreto en Render, nunca en el código).
+# Sin clave configurada o con clave incorrecta, no se muestra ningún dato.
+PANEL_PASSWORD = os.environ.get("PANEL_PASSWORD", "")
+
+
+def _panel_datos():
+    """Lee los totales y los últimos mensajes de Supabase. Si no hay base
+    o falla, devuelve ceros y listas vacías (el panel sigue cargando)."""
+    datos = {"total": 0, "contactos": 0, "hoy": 0, "ultimos": [], "top": [], "por_dia": []}
+    conn = None
+    try:
+        conn = _db_conectar()
+        if conn is None:
+            return datos
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM mensajes")
+            datos["total"] = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM contactos")
+            datos["contactos"] = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM mensajes WHERE fecha >= now() - interval '24 hours'")
+            datos["hoy"] = cur.fetchone()[0]
+            cur.execute(
+                "SELECT fecha, telefono, tipo, texto, opcion FROM mensajes"
+                " ORDER BY fecha DESC LIMIT 50"
+            )
+            datos["ultimos"] = cur.fetchall()
+            cur.execute(
+                "SELECT telefono, total_mensajes, ultima_vez FROM contactos"
+                " ORDER BY total_mensajes DESC LIMIT 10"
+            )
+            datos["top"] = cur.fetchall()
+            cur.execute(
+                "SELECT date(fecha AT TIME ZONE 'America/Mexico_City') AS dia, COUNT(*)"
+                " FROM mensajes WHERE fecha >= now() - interval '7 days'"
+                " GROUP BY dia ORDER BY dia"
+            )
+            datos["por_dia"] = cur.fetchall()
+    except Exception as exc:
+        log_evento("ERROR DB PANEL", str(exc))
+    finally:
+        if conn is not None:
+            conn.close()
+    return datos
+
+
+@app.route("/panel", methods=["GET", "POST"])
+def panel():
+    import html as _html
+    clave = request.values.get("clave", "")
+    if not PANEL_PASSWORD:
+        return ("<h1>Panel no configurado</h1>"
+                "<p>Falta la clave del panel (PANEL_PASSWORD en Render).</p>"), 503
+    if clave != PANEL_PASSWORD:
+        error = "<p style='color:#b00'>Clave incorrecta.</p>" if clave else ""
+        return (f"<html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>"
+                f"<title>Panel - {GYM_NAME}</title></head><body style='font-family:sans-serif;max-width:480px;margin:40px auto;padding:0 16px'>"
+                f"<h1>💚 Panel {GYM_NAME}</h1>{error}"
+                "<form method='post'><label>Clave del panel<br>"
+                "<input type='password' name='clave' style='width:100%;padding:10px;margin:8px 0'></label><br>"
+                "<button style='padding:10px 20px'>Entrar</button></form></body></html>")
+    d = _panel_datos()
+    max_dia = max([n for _, n in d["por_dia"]], default=0) or 1
+    barras = "".join(
+        f"<div>{dia} — {n} mensaje(s)</div>"
+        f"<div style='background:#22c55e;height:14px;width:{max(4, int(n * 100 / max_dia))}%;margin:2px 0 8px'></div>"
+        for dia, n in d["por_dia"]
+    ) or "<p>Sin mensajes en los últimos 7 días.</p>"
+    filas = "".join(
+        "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>".format(
+            _html.escape(str(f)[:16]), _html.escape(str(t)),
+            _html.escape(str(x or "")[:80]), _html.escape(str(o or "")))
+        for f, t, _tipo, x, o in d["ultimos"]
+    ) or "<tr><td colspan='4'>Aún no hay mensajes guardados.</td></tr>"
+    top = "".join(
+        "<tr><td>{}</td><td>{}</td><td>{}</td></tr>".format(
+            _html.escape(str(t)), n, _html.escape(str(u)[:16]))
+        for t, n, u in d["top"]
+    ) or "<tr><td colspan='3'>Sin contactos todavía.</td></tr>"
+    return (f"<html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>"
+            f"<title>Panel - {GYM_NAME}</title></head><body style='font-family:sans-serif;max-width:900px;margin:20px auto;padding:0 16px;line-height:1.5'>"
+            f"<h1>💚 Panel {GYM_NAME}</h1>"
+            f"<p><b>{d['total']}</b> mensajes en total · <b>{d['contactos']}</b> personas distintas · "
+            f"<b>{d['hoy']}</b> en las últimas 24 h</p>"
+            "<h2>Últimos 7 días</h2>" + barras +
+            "<h2>Quién más escribe</h2><table border='1' cellpadding='6' cellspacing='0'>"
+            "<tr><th>Número</th><th>Mensajes</th><th>Última vez</th></tr>" + top + "</table>"
+            "<h2>Últimos mensajes</h2><table border='1' cellpadding='6' cellspacing='0'>"
+            "<tr><th>Fecha</th><th>Número</th><th>Mensaje</th><th>Opción</th></tr>" + filas + "</table>"
+            "</body></html>")
+
 @app.route("/privacy")
 def privacy():
     return """<html><head><meta charset="utf-8"><title>Política de Privacidad - MARQ'S GYM & SPORTS</title></head><body style="font-family:sans-serif;max-width:800px;margin:40px auto;padding:0 20px;line-height:1.6">
