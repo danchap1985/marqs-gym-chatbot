@@ -1175,6 +1175,13 @@ def receive_message():
 
                     # Fallback: nunca volver a mostrar números como menú.
                     if "¿Qué te gustaría consultar?" in reply_text or "Escribe el número" in reply_text:
+                        # La respuesta fuera de tema trae un texto antes del menú;
+                        # si lo descartáramos, el cliente solo vería el menú sin
+                        # saber que el bot solo atiende temas del gym.
+                        if reply_text.startswith("Soy el asistente de MARQ'S GYM"):
+                            intro = reply_text.split("💚 *MARQ'S GYM & SPORTS*", 1)[0].strip()
+                            if intro:
+                                send_whatsapp_message(sender, intro)
                         enviar_menu_principal(sender)
                         continue
 
