@@ -525,8 +525,8 @@ def responder(mensaje, remitente=""):
 
     ESTADOS_CONVERSACION[remitente] = "menu"
     return (
-        "Quiero ayudarte 😊. Puedes preguntarme con tus propias palabras sobre las clases, "
-        "horarios, precios o ubicación.\n\n" + menu_principal()
+        "Soy el asistente de MARQ'S GYM & SPORTS y solo te puedo ayudar con temas del gym: "
+        "clases, horarios, precios, promociones, ubicación y redes sociales. 😊\n\n" + menu_principal()
     )
 
 def enviar_imagen(to, nombre_archivo, caption=""):
