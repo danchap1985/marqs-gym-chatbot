@@ -6,6 +6,11 @@ import unicodedata
 from pathlib import Path
 from flask import Flask, request, jsonify
 
+try:
+    import psycopg2
+except ImportError:  # sin psycopg2 el bot sigue funcionando, solo no guarda en la base
+    psycopg2 = None
+
 app = Flask(__name__)
 
 # Consola compacta: ocultamos los accesos HTTP repetitivos de Flask/Werkzeug.
@@ -127,6 +132,74 @@ def normalizar_texto(texto):
 # Conversación temporal por número. Se reinicia si se detiene el programa.
 ESTADOS_CONVERSACION = {}
 ACTIVIDAD_SELECCIONADA = {}  # actividad elegida por cada usuario durante la demo
+
+# Base de datos en la nube (Supabase, Postgres, plan gratis):
+# cada mensaje que llega se guarda en la tabla "mensajes" (wamid, teléfono,
+# fecha, tipo, texto, opción) y el teléfono en "contactos" (primera/última
+# vez, total de mensajes). Así Dan puede ver quién le escribe sin revisar
+# los registros de Render. La conexión va en la variable de entorno
+# DATABASE_URL (secreto en Render, nunca en el código). Si no hay base
+# configurada o falla, el bot sigue contestando igual, solo no guarda.
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
+
+
+def _db_conectar():
+    if not psycopg2 or not DATABASE_URL:
+        return None
+    return psycopg2.connect(DATABASE_URL, sslmode="require", connect_timeout=5)
+
+
+def _db_ya_registrado(wamid):
+    """True si el wamid ya está en la tabla mensajes (deduplicación persistente:
+    sobrevive a reinicios, a diferencia de la lista en memoria)."""
+    if not wamid:
+        return False
+    conn = None
+    try:
+        conn = _db_conectar()
+        if conn is None:
+            return False
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM mensajes WHERE wamid = %s", (wamid,))
+            return cur.fetchone() is not None
+    except Exception as exc:
+        log_evento("ERROR DB", f"al revisar wamid: {exc}")
+        return False
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def _db_registrar(wamid, telefono, tipo, texto, opcion=""):
+    """Guarda el mensaje entrante y actualiza el contacto. Devuelve True si
+    se guardó; False si no hay base o falló (el bot sigue funcionando)."""
+    conn = None
+    try:
+        conn = _db_conectar()
+        if conn is None:
+            return False
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO mensajes (wamid, telefono, tipo, texto, opcion)"
+                " VALUES (%s, %s, %s, %s, %s) ON CONFLICT (wamid) DO NOTHING",
+                (wamid, telefono, tipo, texto, opcion),
+            )
+            cur.execute(
+                "INSERT INTO contactos (telefono) VALUES (%s)"
+                " ON CONFLICT (telefono) DO UPDATE"
+                " SET ultima_vez = now(), total_mensajes = contactos.total_mensajes + 1",
+                (telefono,),
+            )
+        conn.commit()
+        log_evento("DB GUARDADO", f"de={telefono} | id={wamid or '-'}")
+        return True
+    except Exception as exc:
+        log_evento("ERROR DB", f"al guardar: {exc}")
+        return False
+    finally:
+        if conn is not None:
+            conn.close()
+
 
 # Deduplicación por ID de mensaje de WhatsApp (wamid): Meta a veces reenvía
 # el mismo mensaje y sin esto el bot lo contesta otra vez como si fuera nuevo
@@ -809,6 +882,14 @@ def receive_message():
                     texto_norm = normalizar_texto(incoming_text)
                     log_evento("MENSAJE RECIBIDO", f"de={sender} | texto={incoming_text!r} | id={mensaje_id or '-'}")
 
+                    # Registro en la base en la nube + deduplicación persistente:
+                    # si el wamid ya está guardado, es un reenvío de Meta y no
+                    # se contesta otra vez, aunque el servicio se haya reiniciado.
+                    if mensaje_id and _db_ya_registrado(mensaje_id):
+                        log_evento("MENSAJE DUPLICADO IGNORADO (DB)", f"de={sender} | id={mensaje_id}")
+                        continue
+                    _db_registrar(mensaje_id, sender, tipo_mensaje, incoming_text, seleccion_id)
+
                     # Saludo o regreso al menú principal: imagen configurable + lista principal.
                     if texto_norm in {"hola", "holi", "buenas", "buenos dias", "buenas tardes", "buenas noches", "menu", "inicio", "ayuda", "opciones", "0", "menu principal"}:
                         ESTADOS_CONVERSACION[sender] = "menu"
@@ -1239,6 +1320,7 @@ def privacy():
 <p>Cuando usted escribe al chatbot por WhatsApp, recibimos su número de teléfono y los mensajes que envía, a través de la API de WhatsApp de Meta. No solicitamos contraseñas, datos bancarios ni información sensible.</p>
 <h2>Uso de los datos</h2>
 <p>Usamos su número y sus mensajes únicamente para responder a sus consultas, mostrarle horarios, precios y promociones, y atenderle en recepción. No vendemos ni compartimos sus datos con terceros, salvo con Meta / WhatsApp, que procesa los mensajes como proveedor del servicio de mensajería.</p>
+<p>El número, la fecha y el contenido de los mensajes se guardan en una base de datos segura en la nube (Supabase) para llevar el registro de atención y mejorar el servicio. Solo el personal del gimnasio tiene acceso a ese registro.</p>
 <h2>Conservación y derechos</h2>
 <p>Los mensajes se conservan solo el tiempo necesario para atender su consulta. Usted puede pedir que dejemos de escribirle escribiendo "baja" o contactando a recepción del gimnasio, y puede solicitar la eliminación de su conversación.</p>
 <h2>Contacto</h2>
