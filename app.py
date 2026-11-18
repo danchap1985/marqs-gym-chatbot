@@ -1322,7 +1322,9 @@ PANEL_PASSWORD = os.environ.get("PANEL_PASSWORD", "")
 def _panel_datos():
     """Lee los totales y los últimos mensajes de Supabase. Si no hay base
     o falla, devuelve ceros y listas vacías (el panel sigue cargando)."""
-    datos = {"total": 0, "contactos": 0, "hoy": 0, "ultimos": [], "top": [], "por_dia": []}
+    actividades = ["Box", "Kickboxing", "Yoga", "Pole Dance", "Taekwondo", "Entrenamiento funcional"]
+    datos = {"total": 0, "contactos": 0, "hoy": 0, "ultimos": [], "top": [], "por_dia": [],
+             "por_actividad": [(a, 0) for a in actividades]}
     conn = None
     try:
         conn = _db_conectar()
@@ -1351,6 +1353,26 @@ def _panel_datos():
                 " GROUP BY dia ORDER BY dia"
             )
             datos["por_dia"] = cur.fetchall()
+            # Actividades más consultadas: cuenta los mensajes que eligieron
+            # una actividad, ya sea por botón (opcion act_*) o por texto
+            # ("Box", "Kickboxing", ...). Las 6 salen siempre, aunque sea en 0.
+            cur.execute(
+                "SELECT act, COUNT(*) FROM ("
+                " SELECT CASE"
+                " WHEN opcion = 'act_box' THEN 'Box'"
+                " WHEN opcion = 'act_kickboxing' THEN 'Kickboxing'"
+                " WHEN opcion = 'act_yoga' THEN 'Yoga'"
+                " WHEN opcion = 'act_pole' THEN 'Pole Dance'"
+                " WHEN opcion = 'act_taekwondo' THEN 'Taekwondo'"
+                " WHEN opcion = 'act_funcional' THEN 'Entrenamiento funcional'"
+                " WHEN texto IN ('Box', 'Kickboxing', 'Yoga', 'Pole Dance',"
+                " 'Taekwondo', 'Entrenamiento funcional') THEN texto"
+                " ELSE NULL END AS act FROM mensajes"
+                ") s WHERE act IS NOT NULL GROUP BY act"
+            )
+            conteo = dict(cur.fetchall())
+            datos["por_actividad"] = [(a, conteo.get(a, 0)) for a in actividades]
+            datos["por_actividad"].sort(key=lambda x: -x[1])
     except Exception as exc:
         log_evento("ERROR DB PANEL", str(exc))
     finally:
@@ -1381,6 +1403,12 @@ def panel():
         f"<div style='background:#22c55e;height:14px;width:{max(4, int(n * 100 / max_dia))}%;margin:2px 0 8px'></div>"
         for dia, n in d["por_dia"]
     ) or "<p>Sin mensajes en los últimos 7 días.</p>"
+    max_act = max([n for _, n in d["por_actividad"]], default=0) or 1
+    barras_act = "".join(
+        f"<div>{_html.escape(a)} — {n}</div>"
+        f"<div style='background:#2563eb;height:16px;width:{max(4, int(n * 100 / max_act))}%;margin:2px 0 8px'></div>"
+        for a, n in d["por_actividad"]
+    ) or "<p>Sin consultas de actividades todavía.</p>"
     filas = "".join(
         "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>".format(
             _html.escape(str(f)[:16]), _html.escape(str(t)),
@@ -1398,6 +1426,7 @@ def panel():
             f"<p><b>{d['total']}</b> mensajes en total · <b>{d['contactos']}</b> personas distintas · "
             f"<b>{d['hoy']}</b> en las últimas 24 h</p>"
             "<h2>Últimos 7 días</h2>" + barras +
+            "<h2>Actividades más consultadas</h2>" + barras_act +
             "<h2>Quién más escribe</h2><table border='1' cellpadding='6' cellspacing='0'>"
             "<tr><th>Número</th><th>Mensajes</th><th>Última vez</th></tr>" + top + "</table>"
             "<h2>Últimos mensajes</h2><table border='1' cellpadding='6' cellspacing='0'>"
